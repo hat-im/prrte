@@ -130,12 +130,27 @@ static void opcbfunc(pmix_status_t status, void *cbdata)
     PRTE_PMIX_WAKEUP_THREAD(lock);
 }
 
+static void complete_event(pmix_event_notification_cbfunc_fn_t cbfunc, void *cbdata,
+                           prte_pmix_lock_t *release)
+{
+    /* we _always_ have to execute the evhandler callback or
+     * else the event progress engine will hang */
+    if (NULL == cbfunc) {
+        if (NULL != release) {
+            PRTE_PMIX_WAKEUP_THREAD(release);
+        }
+        return;
+    }
+    cbfunc(PMIX_EVENT_ACTION_COMPLETE, NULL, 0, (NULL == release) ? NULL : opcbfunc, release,
+           cbdata);
+}
+
 static void defhandler(size_t evhdlr_registration_id, pmix_status_t status,
                        const pmix_proc_t *source, pmix_info_t info[], size_t ninfo,
                        pmix_info_t *results, size_t nresults,
                        pmix_event_notification_cbfunc_fn_t cbfunc, void *cbdata)
 {
-    prte_pmix_lock_t *lock = NULL;
+    prte_pmix_lock_t *lock = NULL, *release = NULL;
     size_t n;
     pmix_status_t rc;
     PRTE_HIDE_UNUSED_PARAMS(evhdlr_registration_id, source, results, nresults);
@@ -176,15 +191,10 @@ static void defhandler(size_t evhdlr_registration_id, pmix_status_t status,
         }
         /* save the status */
         lock->status = status;
-        /* release the lock */
-        PRTE_PMIX_WAKEUP_THREAD(lock);
+        release = lock;
     }
 progress:
-    /* we _always_ have to execute the evhandler callback or
-     * else the event progress engine will hang */
-    if (NULL != cbfunc) {
-        cbfunc(PMIX_EVENT_ACTION_COMPLETE, NULL, 0, NULL, NULL, cbdata);
-    }
+    complete_event(cbfunc, cbdata, release);
 }
 
 static void evhandler(size_t evhdlr_registration_id, pmix_status_t status,
@@ -227,15 +237,9 @@ static void evhandler(size_t evhdlr_registration_id, pmix_status_t status,
         if (NULL != msg) {
             lock->msg = strdup(msg);
         }
-        /* release the lock */
-        PRTE_PMIX_WAKEUP_THREAD(lock);
     }
 
-    /* we _always_ have to execute the evhandler callback or
-     * else the event progress engine will hang */
-    if (NULL != cbfunc) {
-        cbfunc(PMIX_EVENT_ACTION_COMPLETE, NULL, 0, NULL, NULL, cbdata);
-    }
+    complete_event(cbfunc, cbdata, lock);
 }
 
 static void debug_cbfunc(size_t evhdlr_registration_id, pmix_status_t status,
